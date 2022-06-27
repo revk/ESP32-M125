@@ -27,7 +27,7 @@ static const char __attribute__((unused)) TAG[] = "M125";
 
 #define BITFIELDS "-"
 #define PORT_INV 0x40
-#define port_mask(p) ((p)&0xFF)
+#define port_mask(p) ((p)&0x3F)
 
 #define	settings	\
 	u8(uart,1)	\
