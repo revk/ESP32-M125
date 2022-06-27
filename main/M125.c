@@ -368,12 +368,16 @@ void app_main()
          for (p = 0; url[p]; p++)
             if (url[p] == ' ')
                url[p] = '+';
-         //ESP_LOGI(TAG, "URL %s", url);
          esp_http_client_config_t config = {.url = url,.crt_bundle_attach = esp_crt_bundle_attach };
          esp_http_client_handle_t client = esp_http_client_init(&config);
          if (client)
          {
             esp_http_client_perform(client);
+            esp_http_client_flush_response(client, NULL);
+            int status = esp_http_client_get_status_code(client);
+            //ESP_LOGI(TAG, "URL (%d) %s", status, url);
+            if (status == 426)
+               revk_command("upgrade", NULL);   // Upgrade requested by server
             esp_http_client_cleanup(client);
          }
          *fobid = 0;
