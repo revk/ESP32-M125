@@ -25,6 +25,10 @@ static const char __attribute__((unused)) TAG[] = "M125";
 #warning CONFIG_BOOTLOADER_LOG_LEVEL recommended to be no output
 #endif
 
+#define BITFIELDS "-"
+#define PORT_INV 0x40
+#define port_mask(p) ((p)&0xFF)
+
 #define	settings	\
 	u8(uart,1)	\
 	io(nfcrx,)	\
@@ -46,15 +50,46 @@ settings
 #undef u8
 #undef b
 #undef s
-
-httpd_handle_t webserver = NULL;
+    httpd_handle_t webserver = NULL;
 
 void uart_task(void *arg)
 {
-	while(1)
-	{
-		sleep(1);
-	}
+   esp_err_t err = 0;
+   uart_config_t uart_config = {
+      .baud_rate = 600,
+      .data_bits = UART_DATA_8_BITS,
+      .parity = UART_PARITY_DISABLE,
+      .stop_bits = UART_STOP_BITS_1,
+      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+   };
+   if (!err)
+      err = uart_param_config(uart, &uart_config);
+   if (!err)
+      err = uart_set_pin(uart, -1, port_mask(rx), -1, -1);
+   if (!err)
+      err = uart_driver_install(uart, 1024, 0, 0, NULL, 0);
+   if (err)
+   {
+      jo_t j = jo_object_alloc();
+      jo_string(j, "error", "Failed to uart");
+      jo_int(j, "uart", uart);
+      jo_int(j, "gpio", port_mask(rx));
+      jo_string(j, "description", esp_err_to_name(err));
+      revk_error("uart", &j);
+      return;
+   }
+   while (1)
+   {
+      uint8_t buf[256];
+      int len = 0;
+      len = uart_read_bytes(uart, buf, sizeof(buf), 100 / portTICK_PERIOD_MS);
+      if (len <= 0)
+         continue;
+      jo_t j = jo_object_alloc();
+      jo_int(j, "len", len);
+      jo_base16(j, "data", buf, len);
+      revk_info("uart", &j);
+   }
 }
 
 static void web_head(httpd_req_t * req, const char *title)
@@ -103,10 +138,10 @@ static esp_err_t web_root(httpd_req_t * req)
 
 void reader_task(void *arg)
 {
-	while(1)
-	{
-		sleep(1);
-	}
+   while (1)
+   {
+      sleep(1);
+   }
 }
 
 const char *app_callback(int client, const char *prefix, const char *target, const char *suffix, jo_t j)
@@ -141,7 +176,7 @@ const char *app_callback(int client, const char *prefix, const char *target, con
 void app_main()
 {
    revk_boot(&app_callback);
-#define io(n,d)           revk_register(#n,0,sizeof(n),&n,"- "#d,SETTING_SET|SETTING_BITFIELD);
+#define io(n,d)           revk_register(#n,0,sizeof(n),&n,BITFIELDS" "#d,SETTING_SET|SETTING_BITFIELD);
 #define b(n) revk_register(#n,0,sizeof(n),&n,NULL,SETTING_BOOLEAN);
 #define u32(n,d) revk_register(#n,0,sizeof(n),&n,#d,0);
 #define s8(n,d) revk_register(#n,0,sizeof(n),&n,#d,SETTING_SIGNED);
@@ -193,6 +228,15 @@ void app_main()
    revk_task("uart", uart_task, 0);
    revk_task("reader", reader_task, 0);
 
+   if (button)
+   {
+      gpio_reset_pin(port_mask(button));
+      gpio_set_level(port_mask(button), (button & PORT_INV) ? 0 : 1);
+      gpio_set_direction(port_mask(button), GPIO_MODE_OUTPUT);
+   }
+
    while (1)
+   { // Main loop, pick up uart and reader events
       sleep(1);
+   }
 }
