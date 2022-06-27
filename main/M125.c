@@ -38,6 +38,8 @@ static const char __attribute__((unused)) TAG[] = "M125";
 	io(button,)	\
 	io(rx,)		\
 	b(debug)	\
+	s(cloudhost)	\
+	s(cloudpass)	\
 
 #define u32(n,d)        uint32_t n;
 #define s8(n,d) int8_t n;
@@ -55,6 +57,7 @@ settings
     httpd_handle_t webserver = NULL;
 pn532_t *pn532 = NULL;
 char fobid[21];
+char weight[30];
 volatile uint8_t tagready = 0;
 volatile uint8_t weightready = 0;
 
@@ -88,23 +91,32 @@ void uart_task(void *arg)
    {
       char buf[256];
       int len = 0;
-      len = uart_read_bytes(uart, buf, sizeof(buf), 1000 / portTICK_PERIOD_MS);
+      len = uart_read_bytes(uart, buf, sizeof(buf) - 1, 100 / portTICK_PERIOD_MS);
       if (len <= 0)
          continue;
-      // Decode weight
+      buf[len] = 0;
+      if (weightready)
+         continue;
+      // Extract net weight
+      char *g = strstr(buf, "NET WEIGHT");
+      if (!g)
+         continue;
+      g += 10;
+      while (*g == ' ')
+         g++;
+      char *e = strchr(g, '\r');
+      if (!e || e - g > sizeof(weight))
+         continue;
+      *e = 0;
+      strcpy(weight, g);
+      ESP_LOGI(TAG, "Weight:%s", weight);
       weightready = 1;
-      ESP_LOGI(TAG, "UART %d %.*s", len, len, buf);
-      jo_t j = jo_object_alloc();
-      jo_int(j, "len", len);
-      jo_base16(j, "data", buf, len);
-      jo_stringn(j, "text", buf, len);
-      revk_info("uart", &j);
    }
 }
 
 static void web_head(httpd_req_t * req, const char *title)
 {
-   httpd_resp_set_type(req, "text/html; charset=utf-8");
+
    httpd_resp_sendstr_chunk(req, "<meta name='viewport' content='width=device-width, initial-scale=1'>");
    httpd_resp_sendstr_chunk(req, "<html><head><title>");
    if (title)
@@ -166,11 +178,14 @@ void reader_task(void *arg)
          cards = 0;
          ESP_LOGI(TAG, "Gone");
       }
-
+      if (tagready)
+         continue;              // Waiting
       cards = pn532_Cards(pn532);
       if (cards <= 0)
          continue;
       pn532_nfcid(pn532, fobid);
+      if (!*fobid)
+         continue;
       ESP_LOGI(TAG, "Card %s", fobid);
       tagready = 1;
    }
@@ -208,7 +223,10 @@ const char *app_callback(int client, const char *prefix, const char *target, con
 void app_main()
 {
    *fobid = 0;
+   *weight = 0;
    revk_boot(&app_callback);
+   revk_register("nfc", 0, sizeof(nfcuart), &nfcuart, "2", SETTING_SECRET);     // parent setting for NFC (uart)
+   revk_register("cloud", 0, 0, &cloudhost, NULL, SETTING_SECRET);      // parent setting for Cloud
 #define io(n,d)           revk_register(#n,0,sizeof(n),&n,BITFIELDS" "#d,SETTING_SET|SETTING_BITFIELD);
 #define b(n) revk_register(#n,0,sizeof(n),&n,NULL,SETTING_BOOLEAN);
 #define u32(n,d) revk_register(#n,0,sizeof(n),&n,#d,0);
@@ -223,7 +241,23 @@ void app_main()
 #undef b
 #undef s
        revk_start();
-
+   if (!*cloudhost || !*cloudpass)
+   {                            // Special defaults
+      jo_t j = jo_object_alloc();
+      if (!*cloudhost)
+         jo_string(j, "cloudhost", "weigh.me.uk");
+      if (!*cloudpass)
+      {
+         int i;
+         char pass[33];
+         for (i = 0; i < sizeof(pass) - 1; i++)
+            pass[i] = 'A' + (esp_random() % 26);
+         pass[i] = 0;           // End
+         jo_string(j, "cloudpass", pass);
+      }
+      revk_setting(j);
+      jo_free(&j);
+   }
    // Web interface
    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
    if (!httpd_start(&webserver, &config))
@@ -284,14 +318,68 @@ void app_main()
                usleep(100000);
                gpio_set_level(port_mask(button), (button & PORT_INV) ? 0 : 1);
                sleep(2);
+               if (weightready && *weight == '0')
+                  weightready = 0;      // Try again. Small weight
             }
       }
       if (tagready || weightready)
       {                         // Send
          ESP_LOGI(TAG, "Send data");
+         float kg = -1;
+         jo_t j = jo_object_alloc();
+         if (tagready)
+            jo_string(j, "id", fobid);
+         if (weightready)
+         {
+            jo_string(j, "weight", weight);
+            // NET WEIGHT    0 st  0.0 lb
+            // NET WEIGHT         0.00 kg
+            float st,
+             lb;
+            if (strstr(weight, "st") && sscanf(weight, "%f st %f lb", &st, &lb) == 2)
+               kg = (st * 14 + lb) / 2.20462;
+            else if (strstr(weight, "lb") && sscanf(weight, "%f lb", &lb) == 1)
+               kg = lb / 2.20462;
+            else if (strstr(weight, "kg") && sscanf(weight, "%f kg", &lb) == 1)
+               kg = lb;
+            if (kg >= 0)
+               jo_litf(j, "kg", "%.2f", kg);
+         }
+         revk_error("weight", &j);
+
+         char url[250];
+         int m = sizeof(url) - 1,
+             p = 0;
+         if (p < m)
+            p += snprintf(url + p, m - p, "https://%s", cloudhost);
+         if (p < m)
+            p += snprintf(url + p, m - p, "/weighin.cgi?version=%s", revk_version);
+         if (p < m)
+            p += snprintf(url + p, m - p, "&scales=%s", revk_id);
+         if (p < m && cloudpass)
+            p += snprintf(url + p, m - p, "&auth=%s", cloudpass);       // Assume no special characters
+         if (p < m && weightready)
+            p += snprintf(url + p, m - p, "&weight=%s", weight);
+         if (p < m && weightready && kg >= 0)
+            p += snprintf(url + p, m - p, "&kg=%.2f", kg);
+         if (p < m && tagready)
+            p += snprintf(url + p, m - p, "&id=%s", fobid);
+         url[p] = 0;
+         for (p = 0; url[p]; p++)
+            if (url[p] == ' ')
+               url[p] = '+';
+         //ESP_LOGI(TAG, "URL %s", url);
+         esp_http_client_config_t config = {.url = url,.crt_bundle_attach = esp_crt_bundle_attach };
+         esp_http_client_handle_t client = esp_http_client_init(&config);
+         if (client)
+         {
+            esp_http_client_perform(client);
+            esp_http_client_cleanup(client);
+         }
+         *fobid = 0;
+         *weight = 0;
          tagready = 0;
          weightready = 0;
-         *fobid = 0;
       }
    }
 }
