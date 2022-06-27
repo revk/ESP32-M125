@@ -1,6 +1,6 @@
 # ESP32-M125
 
-This is hardware and software designed to be fitted within a Marsed M-125 set of medical scales.
+This is hardware and software designed to be fitted within a Marsden M-125 set of medical scales.
 
 Examples of modifications with much older prototype boards https://youtu.be/l1VAymhwtVMand  https://youtu.be/jy-5EB_Qu8Y
 
