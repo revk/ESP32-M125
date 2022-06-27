@@ -9,6 +9,7 @@ static const char __attribute__((unused)) TAG[] = "M125";
 #include "esp_http_client.h"
 #include "esp_http_server.h"
 #include "esp_crt_bundle.h"
+#include "pn532.h"
 #include <driver/gpio.h>
 #include <driver/uart.h>
 
@@ -31,8 +32,9 @@ static const char __attribute__((unused)) TAG[] = "M125";
 
 #define	settings	\
 	u8(uart,1)	\
+	u8(nfcuart,2)	\
 	io(nfcrx,)	\
-	io(nfxtx,)	\
+	io(nfctx,)	\
 	io(button,)	\
 	io(rx,)		\
 	b(debug)	\
@@ -51,12 +53,16 @@ settings
 #undef b
 #undef s
     httpd_handle_t webserver = NULL;
+pn532_t *pn532 = NULL;
+char fobid[21];
+volatile uint8_t tagready = 0;
+volatile uint8_t weightready = 0;
 
 void uart_task(void *arg)
 {
    esp_err_t err = 0;
    uart_config_t uart_config = {
-      .baud_rate = 600,
+      .baud_rate = 9600,
       .data_bits = UART_DATA_8_BITS,
       .parity = UART_PARITY_DISABLE,
       .stop_bits = UART_STOP_BITS_1,
@@ -80,14 +86,18 @@ void uart_task(void *arg)
    }
    while (1)
    {
-      uint8_t buf[256];
+      char buf[256];
       int len = 0;
-      len = uart_read_bytes(uart, buf, sizeof(buf), 100 / portTICK_PERIOD_MS);
+      len = uart_read_bytes(uart, buf, sizeof(buf), 1000 / portTICK_PERIOD_MS);
       if (len <= 0)
          continue;
+      // Decode weight
+      weightready = 1;
+      ESP_LOGI(TAG, "UART %d %.*s", len, len, buf);
       jo_t j = jo_object_alloc();
       jo_int(j, "len", len);
       jo_base16(j, "data", buf, len);
+      jo_stringn(j, "text", buf, len);
       revk_info("uart", &j);
    }
 }
@@ -138,9 +148,31 @@ static esp_err_t web_root(httpd_req_t * req)
 
 void reader_task(void *arg)
 {
+   int cards = 0;
    while (1)
    {
-      sleep(1);
+      usleep(100000);
+      if (!pn532)
+      {
+         pn532 = pn532_init(nfcuart, port_mask(nfctx), port_mask(nfcrx), 0);
+         if (!pn532)
+            continue;
+         ESP_LOGI(TAG, "NFC Init OK");
+      }
+      if (cards)
+      {
+         if (pn532_Present(pn532))
+            continue;
+         cards = 0;
+         ESP_LOGI(TAG, "Gone");
+      }
+
+      cards = pn532_Cards(pn532);
+      if (cards <= 0)
+         continue;
+      pn532_nfcid(pn532, fobid);
+      ESP_LOGI(TAG, "Card %s", fobid);
+      tagready = 1;
    }
 }
 
@@ -175,6 +207,7 @@ const char *app_callback(int client, const char *prefix, const char *target, con
 
 void app_main()
 {
+   *fobid = 0;
    revk_boot(&app_callback);
 #define io(n,d)           revk_register(#n,0,sizeof(n),&n,BITFIELDS" "#d,SETTING_SET|SETTING_BITFIELD);
 #define b(n) revk_register(#n,0,sizeof(n),&n,NULL,SETTING_BOOLEAN);
@@ -236,7 +269,29 @@ void app_main()
    }
 
    while (1)
-   { // Main loop, pick up uart and reader events
-      sleep(1);
+   {                            // Main loop, pick up uart and reader events
+      usleep(100000);
+      if (tagready)
+      {                         // We press button until we get weight or give up
+         int try = 20;
+         if (!button)
+            sleep(5);
+         else
+            while (try-- && !weightready)
+            {
+               ESP_LOGI(TAG, "Pushing send");
+               gpio_set_level(port_mask(button), (button & PORT_INV) ? 1 : 0);
+               usleep(100000);
+               gpio_set_level(port_mask(button), (button & PORT_INV) ? 0 : 1);
+               sleep(2);
+            }
+      }
+      if (tagready || weightready)
+      {                         // Send
+         ESP_LOGI(TAG, "Send data");
+         tagready = 0;
+         weightready = 0;
+         *fobid = 0;
+      }
    }
 }
