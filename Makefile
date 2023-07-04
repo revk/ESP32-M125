@@ -10,11 +10,17 @@ MODELS := M125
 all:	
 	@echo Make: $(PROJECT_NAME)$(SUFFIX).bin
 	@idf.py build
-	@cp --remove-destination build/$(PROJECT_NAME).bin $(PROJECT_NAME)$(SUFFIX).bin
+	@cp build/$(PROJECT_NAME).bin $(PROJECT_NAME)$(SUFFIX).bin
 	@echo Done: $(PROJECT_NAME)$(SUFFIX).bin
 
-issue:  set
-	cp --remove-destination M125*.bin release
+issue:  
+	-git pull
+	-git submodule update --recursive
+	-git commit -a -m checkpoint
+	@make set
+	cp $(PROJECT_NAME)*.bin release
+	git commit -a -m release
+	git push
 
 set:    wroom solo pico
 
