@@ -10,3 +10,5 @@
 secure_*.pem
 build/*
 sdkconfig
+settings.c
+settings.h
