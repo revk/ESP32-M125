@@ -54,7 +54,6 @@ settings
 #undef u8
 #undef b
 #undef s
-   httpd_handle_t webserver = NULL;
 pn532_t *pn532 = NULL;
 char fobid[21];
 char weight[30];
@@ -116,54 +115,6 @@ uart_task (void *arg)
    }
 }
 
-static void
-web_head (httpd_req_t * req, const char *title)
-{
-
-   httpd_resp_sendstr_chunk (req, "<meta name='viewport' content='width=device-width, initial-scale=1'>");
-   httpd_resp_sendstr_chunk (req, "<html><head><title>");
-   if (title)
-      httpd_resp_sendstr_chunk (req, title);
-   httpd_resp_sendstr_chunk (req, "</title></head><style>"      //
-                             "body{font-family:sans-serif;background:#8cf;}"    //
-                             "</style><body><h1>");
-   if (title)
-      httpd_resp_sendstr_chunk (req, title);
-   httpd_resp_sendstr_chunk (req, "</h1>");
-}
-
-static esp_err_t
-web_foot (httpd_req_t * req)
-{
-   httpd_resp_sendstr_chunk (req, "<hr><address>");
-   char temp[20];
-   snprintf (temp, sizeof (temp), "%012llX", revk_binid);
-   httpd_resp_sendstr_chunk (req, temp);
-   httpd_resp_sendstr_chunk (req, " <a href='wifi'>WiFi Setup</a></address></body></html>");
-   httpd_resp_sendstr_chunk (req, NULL);
-   return ESP_OK;
-}
-
-static esp_err_t
-web_icon (httpd_req_t * req)
-{                               // serve image -  maybe make more generic file serve
-   extern const char start[] asm ("_binary_apple_touch_icon_png_start");
-   extern const char end[] asm ("_binary_apple_touch_icon_png_end");
-   httpd_resp_set_type (req, "image/png");
-   httpd_resp_send (req, start, end - start);
-   return ESP_OK;
-}
-
-static esp_err_t
-web_root (httpd_req_t * req)
-{
-   if (revk_link_down ())
-      return revk_web_config (req);     // Direct to web set up
-   web_head (req, *hostname ? hostname : appname);
-
-   return web_foot (req);
-}
-
 void
 reader_task (void *arg)
 {
@@ -173,7 +124,7 @@ reader_task (void *arg)
       usleep (100000);
       if (!pn532)
       {
-         pn532 = pn532_init (nfcuart, port_mask (nfctx), port_mask (nfcrx), 0);
+         pn532 = pn532_init (nfcuart, 4, port_mask (nfctx), port_mask (nfcrx), 0);
          if (!pn532)
             continue;
          ESP_LOGI (TAG, "NFC Init OK");
@@ -217,8 +168,6 @@ app_callback (int client, const char *prefix, const char *target, const char *su
    if (!strcmp (suffix, "connect"))
    {
    }
-   if (!strcmp (suffix, "shutdown"))
-      httpd_stop (webserver);
    return NULL;
 }
 
@@ -266,39 +215,6 @@ app_main ()
       }
       revk_setting (j);
       jo_free (&j);
-   }
-   // Web interface
-   httpd_config_t config = HTTPD_DEFAULT_CONFIG ();
-   if (!httpd_start (&webserver, &config))
-   {
-      {
-         httpd_uri_t uri = {
-            .uri = "/",
-            .method = HTTP_GET,
-            .handler = web_root,
-            .user_ctx = NULL
-         };
-         REVK_ERR_CHECK (httpd_register_uri_handler (webserver, &uri));
-      }
-      {
-         httpd_uri_t uri = {
-            .uri = "/apple-touch-icon.png",
-            .method = HTTP_GET,
-            .handler = web_icon,
-            .user_ctx = NULL
-         };
-         REVK_ERR_CHECK (httpd_register_uri_handler (webserver, &uri));
-      }
-      {
-         httpd_uri_t uri = {
-            .uri = "/wifi",
-            .method = HTTP_GET,
-            .handler = revk_web_config,
-            .user_ctx = NULL
-         };
-         REVK_ERR_CHECK (httpd_register_uri_handler (webserver, &uri));
-      }
-      revk_web_config_start (webserver);
    }
 
    revk_task ("uart", uart_task, 0, 8);
