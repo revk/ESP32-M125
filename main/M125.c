@@ -225,17 +225,18 @@ app_main ()
          }
          revk_error ("weight", &j);
 
-         if (weightready && kg >= 0 && (*toot || *topic))
+         if (weightready && kg > 0 && (*toot || *topic))
          {
             struct tm t;
             time_t now = time (0);
             localtime_r (&now, &t);
+            char when[30];
+            strftime (when, sizeof (when), "%F %T %Z", &t);
+
             char *pl = NULL;
-            asprintf (&pl, "%04d-%02d-%02d %02d:%02d:%02d %s\r\nGood %s%s%s, your weight is %.2fkg (%s)\r\n\r\n",       //
-                      t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, hostname,        //
-                      t.tm_hour < 12 ? "morning" : t.tm_hour < 18 ? "afternoon" : "evening",    //
-                      tagready ? " " : "", tagready ? fobid : "",       //
-                      kg, weight);
+            asprintf (&pl, "%s %s %s\r\nGood %s, your weight is %.2fkg (%s)\r\n\r\n",      //
+                      when, hostname, fobid,     //
+                      t.tm_hour < 12 ? "morning" : t.tm_hour < 18 ? "afternoon" : "evening", kg, weight);
             if (*toot)
                revk_mqtt_send_raw ("toot", 0, pl, 1);
             if (*topic)
