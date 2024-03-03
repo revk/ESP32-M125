@@ -7,3 +7,5 @@ gpio	rx					// Serial data input
 bit	debug					// Debug
 s	cloud.host				// Cloud server hostname
 s	cloud.pass		.secret=1	// Cloud server password
+s	toot					// User to toot
+s	topic					// MQTT topic for direct MQTT

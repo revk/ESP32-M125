@@ -225,38 +225,57 @@ app_main ()
          }
          revk_error ("weight", &j);
 
-         char url[250];
-         int m = sizeof (url) - 1,
-            p = 0;
-         if (p < m)
-            p += snprintf (url + p, m - p, "https://%s", cloudhost);
-         if (p < m)
-            p += snprintf (url + p, m - p, "/weighin.cgi?version=%s", revk_version);
-         if (p < m)
-            p += snprintf (url + p, m - p, "&scales=%s", revk_id);
-         if (p < m && cloudpass)
-            p += snprintf (url + p, m - p, "&auth=%s", cloudpass);      // Assume no special characters
-         if (p < m && weightready)
-            p += snprintf (url + p, m - p, "&weight=%s", weight);
-         if (p < m && weightready && kg >= 0)
-            p += snprintf (url + p, m - p, "&kg=%.2f", kg);
-         if (p < m && tagready)
-            p += snprintf (url + p, m - p, "&id=%s", fobid);
-         url[p] = 0;
-         for (p = 0; url[p]; p++)
-            if (url[p] == ' ')
-               url[p] = '+';
-         esp_http_client_config_t config = {.url = url,.crt_bundle_attach = esp_crt_bundle_attach };
-         esp_http_client_handle_t client = esp_http_client_init (&config);
-         if (client)
+         if (weightready && kg >= 0 && (*toot || *topic))
          {
-            esp_http_client_perform (client);
-            esp_http_client_flush_response (client, NULL);
-            int status = esp_http_client_get_status_code (client);
-            //ESP_LOGI(TAG, "URL (%d) %s", status, url);
-            if (status == 426)
-               revk_command ("upgrade", NULL);  // Upgrade requested by server
-            esp_http_client_cleanup (client);
+            struct tm t;
+            time_t now = time (0);
+            localtime_r (&now, &t);
+            char *pl = NULL;
+            asprintf (&pl, "%04d-%02d-%02d %02d:%02d:%02d %s\r\nGood %s%s%s, your weight is %.2fkg (%s)\r\n\r\n",       //
+                      t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, hostname,        //
+                      t.tm_hour < 12 ? "morning" : t.tm_hour < 18 ? "afternoon" : "evening",    //
+                      tagready ? " " : "", tagready ? fobid : "",       //
+                      kg, weight);
+            if (*toot)
+               revk_mqtt_send_raw ("toot", 0, pl, 1);
+            if (*topic)
+               revk_mqtt_send_raw (topic, 0, pl, 1);
+            free (pl);
+         }
+         if (*cloudhost)
+         {
+            char url[250];
+            int m = sizeof (url) - 1,
+               p = 0;
+            if (p < m)
+               p += snprintf (url + p, m - p, "https://%s", cloudhost);
+            if (p < m)
+               p += snprintf (url + p, m - p, "/weighin.cgi?version=%s", revk_version);
+            if (p < m)
+               p += snprintf (url + p, m - p, "&scales=%s", revk_id);
+            if (p < m && cloudpass)
+               p += snprintf (url + p, m - p, "&auth=%s", cloudpass);   // Assume no special characters
+            if (p < m && weightready)
+               p += snprintf (url + p, m - p, "&weight=%s", weight);
+            if (p < m && weightready && kg >= 0)
+               p += snprintf (url + p, m - p, "&kg=%.2f", kg);
+            if (p < m && tagready)
+               p += snprintf (url + p, m - p, "&id=%s", fobid);
+            url[p] = 0;
+            for (p = 0; url[p]; p++)
+               if (url[p] == ' ')
+                  url[p] = '+';
+            esp_http_client_config_t config = {.url = url,.crt_bundle_attach = esp_crt_bundle_attach };
+            esp_http_client_handle_t client = esp_http_client_init (&config);
+            if (client)
+            {
+               esp_http_client_perform (client);
+               esp_http_client_flush_response (client, NULL);
+               int status = esp_http_client_get_status_code (client);
+               if (status == 426)
+                  revk_command ("upgrade", NULL);       // Upgrade requested by server
+               esp_http_client_cleanup (client);
+            }
          }
          *fobid = 0;
          *weight = 0;
