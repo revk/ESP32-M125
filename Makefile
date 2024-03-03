@@ -13,13 +13,23 @@ all:	settings.h
 	@cp build/$(PROJECT_NAME).bin $(PROJECT_NAME)$(SUFFIX).bin
 	@echo Done: $(PROJECT_NAME)$(SUFFIX).bin
 
-issue:  
+beta:   
 	-git pull
 	-git submodule update --recursive
 	-git commit -a -m checkpoint
 	@make set
+	cp $(PROJECT_NAME)*.bin betarelease
+	git commit -a -m Beta
+	git push
+
+issue:
+	-git pull
+	-git submodule update --recursive
+	-git commit -a -m checkpoint
+	@make set
+	cp $(PROJECT_NAME)*.bin betarelease
 	cp $(PROJECT_NAME)*.bin release
-	git commit -a -m release
+	git commit -a -m Release
 	git push
 
 settings.h:     components/ESP32-RevK/revk_settings settings.def components/ESP32-RevK/settings.def
