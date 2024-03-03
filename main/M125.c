@@ -26,34 +26,6 @@ static const char __attribute__((unused)) TAG[] = "M125";
 #warning CONFIG_BOOTLOADER_LOG_LEVEL recommended to be no output
 #endif
 
-#define BITFIELDS "-"
-#define PORT_INV 0x40
-#define port_mask(p) ((p)&0x3F)
-
-#define	settings	\
-	u8(uart,1)	\
-	u8(nfcuart,2)	\
-	io(nfcrx,)	\
-	io(nfctx,)	\
-	io(button,)	\
-	io(rx,)		\
-	b(debug)	\
-	s(cloudhost)	\
-	s(cloudpass)	\
-
-#define u32(n,d)        uint32_t n;
-#define s8(n,d) int8_t n;
-#define u8(n,d) uint8_t n;
-#define b(n) uint8_t n;
-#define s(n) char * n;
-#define io(n,d)           uint8_t n;
-settings
-#undef io
-#undef u32
-#undef s8
-#undef u8
-#undef b
-#undef s
 pn532_t *pn532 = NULL;
 char fobid[21];
 char weight[30];
@@ -75,7 +47,7 @@ uart_task (void *arg)
    if (!err)
       err = uart_param_config (uart, &uart_config);
    if (!err)
-      err = uart_set_pin (uart, -1, port_mask (rx), -1, -1);
+      err = uart_set_pin (uart, -1, rx.num, -1, -1);
    if (!err)
       err = uart_driver_install (uart, 1024, 0, 0, NULL, 0);
    if (err)
@@ -83,7 +55,7 @@ uart_task (void *arg)
       jo_t j = jo_object_alloc ();
       jo_string (j, "error", "Failed to uart");
       jo_int (j, "uart", uart);
-      jo_int (j, "gpio", port_mask (rx));
+      jo_int (j, "gpio", rx.num);
       jo_string (j, "description", esp_err_to_name (err));
       revk_error ("uart", &j);
       return;
@@ -124,7 +96,7 @@ reader_task (void *arg)
       usleep (100000);
       if (!pn532)
       {
-         pn532 = pn532_init (nfcuart, 4, port_mask (nfctx), port_mask (nfcrx), 0);
+         pn532 = pn532_init (nfcuart, 4, nfctx.num, nfcrx.num, 0);
          if (!pn532)
             continue;
          ESP_LOGI (TAG, "NFC Init OK");
@@ -183,22 +155,7 @@ app_main ()
    *fobid = 0;
    *weight = 0;
    revk_boot (&app_callback);
-   revk_register ("nfc", 0, sizeof (nfcuart), &nfcuart, "2", SETTING_SECRET);   // parent setting for NFC (uart)
-   revk_register ("cloud", 0, 0, &cloudhost, NULL, SETTING_SECRET);     // parent setting for Cloud
-#define io(n,d)           revk_register(#n,0,sizeof(n),&n,BITFIELDS" "#d,SETTING_SET|SETTING_BITFIELD);
-#define b(n) revk_register(#n,0,sizeof(n),&n,NULL,SETTING_BOOLEAN);
-#define u32(n,d) revk_register(#n,0,sizeof(n),&n,#d,0);
-#define s8(n,d) revk_register(#n,0,sizeof(n),&n,#d,SETTING_SIGNED);
-#define u8(n,d) revk_register(#n,0,sizeof(n),&n,#d,0);
-#define s(n) revk_register(#n,0,0,&n,NULL,0);
-   settings
-#undef io
-#undef u32
-#undef s8
-#undef u8
-#undef b
-#undef s
-      revk_start ();
+   revk_start ();
    if (!*cloudhost || !*cloudpass)
    {                            // Special defaults
       jo_t j = jo_object_alloc ();
@@ -220,12 +177,8 @@ app_main ()
    revk_task ("uart", uart_task, 0, 8);
    revk_task ("reader", reader_task, 0, 8);
 
-   if (button)
-   {
-      gpio_reset_pin (port_mask (button));
-      gpio_set_level (port_mask (button), (button & PORT_INV) ? 0 : 1);
-      gpio_set_direction (port_mask (button), GPIO_MODE_OUTPUT);
-   }
+   revk_gpio_output (button);
+   revk_gpio_set (button, 0);
 
    while (1)
    {                            // Main loop, pick up uart and reader events
@@ -233,15 +186,15 @@ app_main ()
       if (tagready)
       {                         // We press button until we get weight or give up
          int try = 20;
-         if (!button)
+         if (!button.set)
             sleep (5);
          else
             while (try-- && !weightready)
             {
                ESP_LOGI (TAG, "Pushing send");
-               gpio_set_level (port_mask (button), (button & PORT_INV) ? 1 : 0);
+               revk_gpio_set (button, 1);
                usleep (100000);
-               gpio_set_level (port_mask (button), (button & PORT_INV) ? 0 : 1);
+               revk_gpio_set (button, 0);
                sleep (2);
                if (weightready && *weight == '0')
                   weightready = 0;      // Try again. Small weight
