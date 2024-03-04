@@ -230,17 +230,18 @@ app_main ()
             struct tm t;
             time_t now = time (0);
             localtime_r (&now, &t);
-            char when[30];
-            strftime (when, sizeof (when), "%F %T %Z", &t);
+            char when[40];
+            strftime (when, sizeof (when), "%a %F %T %Z", &t);
 
             char *pl = NULL;
-            asprintf (&pl, "%s %s %s\r\nGood %s, your weight is %.2fkg (%s)\r\n\r\n",      //
-                      when, hostname, fobid,     //
-                      t.tm_hour < 12 ? "morning" : t.tm_hour < 18 ? "afternoon" : "evening", kg, weight);
+            asprintf (&pl, "@%s\nGood %s, your weight is %.2fkg (%s)\r\n%s %s %s\r\n\r\n",      //
+                      toot,     //
+                      t.tm_hour < 12 ? "morning" : t.tm_hour < 18 ? "afternoon" : "evening", kg, weight,        //
+                      when, hostname, fobid);
             if (*toot)
                revk_mqtt_send_raw ("toot", 0, pl, 1);
             if (*topic)
-               revk_mqtt_send_raw (topic, 0, pl, 1);
+               revk_mqtt_send_raw (topic, 0, pl + 2 + strlen (toot), 1);
             free (pl);
          }
          if (*cloudhost)
