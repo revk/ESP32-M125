@@ -7,6 +7,8 @@
 *.old
 */*.old
 */*/*.old
-secure_boot_signing_key.pem
+secure_*.pem
 build/*
 sdkconfig
+settings.c
+settings.h

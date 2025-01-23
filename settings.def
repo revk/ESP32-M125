@@ -1,0 +1,11 @@
+u8	uart		1
+u8	nfc.uart	2
+gpio	nfc.rx					// NFC reader Rx
+gpio	nfc.tx					// NFC reader Tx
+gpio	button					// Button input
+gpio	rx					// Serial data input
+bit	debug					// Debug
+s	cloud.host				// Cloud server hostname
+s	cloud.pass		.secret=1	// Cloud server password
+s	toot					// User to toot
+s	topic					// MQTT topic for direct MQTT
